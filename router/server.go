@@ -20,15 +20,13 @@ type App struct {
 func New(app *fiber.App) *fiber.App {
 	log.SetLevel(log.LevelInfo)
 	app.Use(logger.New())
-	// Define EP
+	// Define EP - Middleware hand pass here (?)
 	app.Use("/api", func(c *fiber.Ctx) error {
 		return c.Next()
 	})
 	// Init Mongo Client and pass to others!
 	db := mongoDatabase().Database("testDB")
 	loadRoutes(app, db)
-	// Called on shut down op
-
 	return app
 }
 
@@ -37,9 +35,8 @@ func (a *App) Start() error {
 	New(app)
 	err := app.Listen(":3000")
 	if err != nil {
-		log.Fatal("an error occured in server.go due to: %w", err)
+		log.Fatal("an error occurred in server.go due to: %w", err)
 	}
-	// boiler?
 	return nil
 }
 
