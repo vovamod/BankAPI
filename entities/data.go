@@ -49,8 +49,22 @@ func InitTransactionRouter(app *fiber.App, db *mongo.Database) {
 	api.Get("/", withCollection(db, "transactions", GetAllTransactions))
 	api.Get("/:id", withCollection(db, "transactions", GetTransactionByID))
 }
-func InitUserRouter(app *fiber.App, db *mongo.Database)    {}
-func InitAccountRouter(app *fiber.App, db *mongo.Database) {}
+func InitUserRouter(app *fiber.App, db *mongo.Database) {
+	//api := app.Group("/api/user")
+	//api.Post("/create", withCollection(db, "user", CreateUser))
+	//api.Get("/", withCollection(db, "user", GetAllUsers))
+	//api.Get("/:id", withCollection(db, "user", GetUserByID))
+	//api.Delete("/:id", withCollection(db, "user", DeleteUserByID))
+	//api.Update("/:id", withCollection(db, "user", UpdateUserByID))
+}
+func InitAccountRouter(app *fiber.App, db *mongo.Database) {
+	//api := app.Group("/api/account")
+	//api.Post("/create", withCollection(db, "account", CreateAccount))
+	//api.Get("/", withCollection(db, "account", GetAllAccount))
+	//api.Get("/:id", withCollection(db, "account", GetAccountByID))
+	//api.Delete("/:id", withCollection(db, "account", DeleteAccountByID))
+	//api.Update("/:id", withCollection(db, "account", UpdateAccountByID))
+}
 
 // Middleware
 func withCollection(collection *mongo.Database, collectionName string, handler func(*fiber.Ctx, *mongo.Collection) error) fiber.Handler {
