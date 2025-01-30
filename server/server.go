@@ -1,4 +1,4 @@
-package router
+package server
 
 import (
 	"context"
@@ -7,12 +7,14 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/joho/godotenv"
 	"github.com/vovamod/BankAPI/entities"
+	"github.com/vovamod/BankAPI/router"
+	"github.com/vovamod/BankAPI/utils"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"os"
 )
 
-// App is called from main then Start() and New() will be executed. Seperated for easier code reading.
+// App is called from main then Start() and New() will be executed. Separated for easier code reading.
 type App struct {
 	router *fiber.Router
 }
@@ -20,10 +22,13 @@ type App struct {
 func New(app *fiber.App) *fiber.App {
 	log.SetLevel(log.LevelInfo)
 	app.Use(logger.New())
-	// Define EP - Middleware hand pass here (?)
-	app.Use("/api", func(c *fiber.Ctx) error {
-		return c.Next()
-	})
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+		return nil
+	}
+	// check env. If missing stop process with fatal log
+	utils.CheckEnv()
 	// Init Mongo Client and pass to others!
 	db := mongoDatabase().Database("testDB")
 	loadRoutes(app, db)
@@ -31,7 +36,9 @@ func New(app *fiber.App) *fiber.App {
 }
 
 func (a *App) Start() error {
-	app := fiber.New()
+	app := fiber.New(fiber.Config{
+		AppName: "BankAPI",
+	})
 	New(app)
 	err := app.Listen(":3000")
 	if err != nil {
@@ -40,17 +47,15 @@ func (a *App) Start() error {
 	return nil
 }
 
-func loadRoutes(api *fiber.App, db *mongo.Database) *fiber.App {
-	entities.Init(api, db)
-	return api
+func loadRoutes(app *fiber.App, db *mongo.Database) *fiber.App {
+	entities.Init(db)
+	router.Configure(app)
+	return app
 }
 
 // func for mongo?
 func mongoDatabase() *mongo.Client {
 	// Check ENV for string
-	if err := godotenv.Load(); err != nil {
-		log.Errorf("No .env file found")
-	}
 	uri := os.Getenv("MONGODB_URI")
 	if uri == "" {
 		log.Fatal("Set your 'MONGODB_URI' environment variable")

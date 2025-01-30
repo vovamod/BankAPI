@@ -5,6 +5,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/log"
 	"github.com/google/uuid"
+	"github.com/vovamod/BankAPI/utils"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -21,14 +22,12 @@ type transaction struct {
 	ByWho  string             `bson:"byWho"`
 	ToWho  string             `bson:"toWho"`
 }
-
 type account struct {
 	Id        primitive.ObjectID `bson:"_id"`
 	Name      string             `bson:"name"`
 	Value     int                `bson:"value"`
 	AccountId string             `bson:"accountId"`
 }
-
 type user struct {
 	Id       primitive.ObjectID `bson:"_id"`
 	Name     string             `bson:"name"`
@@ -36,48 +35,49 @@ type user struct {
 	ObjectId string             `bson:"objectId"`
 }
 
+// Static checkID
+var chBank primitive.ObjectID
+
+// Static mongo client
+var db *mongo.Database
+
 // Init all operations and add them to main App via pointer
-func Init(app *fiber.App, db *mongo.Database) *fiber.App {
-	InitTransactionRouter(app, db)
-	InitAccountRouter(app, db)
-	InitUserRouter(app, db)
-	return app
+func Init(dbA *mongo.Database) {
+	db = dbA
+	BankInit(db, "account")
+	//InitAuthRouter(app, db)
+	//InitTransactionRouter(app, db)
+	//InitAccountRouter(app, db)
+	//InitUserRouter(app, db)
+	//CheckBank(db)
 }
 
-// InitTransactionRouter Creates a Group for structs and CRUD ops
-func InitTransactionRouter(app *fiber.App, db *mongo.Database) {
-	api := app.Group("/api/transactions")
-	api.Post("/create", withCollection(db, "transactions", CreateTransaction))
-	api.Get("/", withCollection(db, "transactions", GetAllTransactions))
-	api.Get("/:id", withCollection(db, "transactions", GetTransactionByID))
-}
-func InitUserRouter(app *fiber.App, db *mongo.Database) {
-	api := app.Group("/api/user")
-	api.Post("/create/:account", withCollection(db, "user", CreateUser))
-	api.Get("/", withCollection(db, "user", GetAllUsers))
-	api.Get("/:id", withCollection(db, "user", GetUserByID))
-	api.Delete("/:id", withCollection(db, "user", DeleteUserByID))
-	api.Put("/:id", withCollection(db, "user", UpdateUserByID))
-}
-func InitAccountRouter(app *fiber.App, db *mongo.Database) {
-	api := app.Group("/api/account")
-	api.Post("/create", withCollection(db, "account", CreateAccount))
-	api.Get("/", withCollection(db, "account", GetAllAccount))
-	api.Get("/:id", withCollection(db, "account", GetAccountByID))
-	api.Delete("/:id", withCollection(db, "account", DeleteAccountByID))
-	// Not needed. We don't want users to update accounts
-	//api.Put("/:id", withCollection(db, "account", UpdateAccountByID))
+// Bank check
+func BankInit(db *mongo.Database, collectionName string) {
+	var ac account
+	collection := db.Collection(collectionName)
+	log.Debugf("Checking if user BANK_ISSUER exists...")
+	err := collection.FindOne(context.Background(), bson.M{"name": "BANK_ISSUER"}).Decode(&ac)
+	if err != nil {
+		log.Info("No BANK_ISSUER exists. Creating a new BANK_ISSUER...")
+		res, errB := collection.InsertOne(context.Background(), &account{Name: "BANK_ISSUER"})
+		if errB != nil {
+			log.Errorf("Error creating BANK_ISSUER: %v", errB)
+		}
+		log.Infof("Created BANK_ISSUER: %v", res.InsertedID)
+	}
+	log.Debugf("BANK_ISSUER exists: %v. Passing to var ch_bank an ObjectID", ac)
+	chBank = ac.Id
 }
 
 // Middleware
-func withCollection(collection *mongo.Database, collectionName string, handler func(*fiber.Ctx, *mongo.Collection) error) fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		return handler(c, collection.Collection(collectionName))
-	}
+func withCollection(collectionName string) *mongo.Collection {
+	return db.Collection(collectionName)
 }
 
 // CRUD ops for InitTransactionRouter
-func CreateTransaction(c *fiber.Ctx, collection *mongo.Collection) error {
+func CreateTransaction(c *fiber.Ctx) error {
+	collection := withCollection("transactions")
 	var t transaction
 	if err := c.BodyParser(&t); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid input"})
@@ -88,16 +88,17 @@ func CreateTransaction(c *fiber.Ctx, collection *mongo.Collection) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Missing or invalid transaction fields"})
 	}
 	t.Date = time.Now()
+	t.Id = primitive.NewObjectID()
 	var toWho account
 	var byWho account
 	errA := collection.Database().Collection("accounts").FindOne(context.Background(), bson.M{"name": t.ToWho}).Decode(&toWho)
 	errB := collection.Database().Collection("accounts").FindOne(context.Background(), bson.M{"name": t.ToWho}).Decode(&toWho)
-	if errA != nil {
+	if errA == nil {
 		t.Status = "Fail"
 		_, _ = collection.InsertOne(context.Background(), t.Status)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid transaction. Account receiver does not exist"})
 	}
-	if errB != nil {
+	if errB == nil {
 		t.Status = "Fail"
 		_, _ = collection.InsertOne(context.Background(), t.Status)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid transaction. Account sender does not exist"})
@@ -121,53 +122,19 @@ func CreateTransaction(c *fiber.Ctx, collection *mongo.Collection) error {
 	return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid transaction. Maybe Account of receiver or sender does not have the value required for transaction"})
 
 }
-func GetAllTransactions(c *fiber.Ctx, collection *mongo.Collection) error {
-	var transactions []transaction
-
-	// Use Find to get all documents in the collection
-	cursor, err := collection.Find(context.Background(), bson.M{})
-	if err != nil {
-		log.Info("Error getting all transactions from database, Error: " + err.Error())
-		return c.Status(fiber.StatusExpectationFailed).JSON(fiber.Map{"error": "Invalid data was received from DB, check logs!"})
-	}
-	// Close cursor
-	defer func(cursor *mongo.Cursor, ctx context.Context) {
-		err := cursor.Close(ctx)
-		if err != nil {
-			log.Info("Error closing Mongo cursor, Error: " + err.Error())
-		}
-	}(cursor, context.Background())
-	// Iterate through the cursor and decode each document
-	for cursor.Next(context.Background()) {
-		var transaction transaction
-		if err := cursor.Decode(&transaction); err != nil {
-			log.Info("Error getting all transactions from database, Error: " + err.Error())
-			return c.Status(fiber.StatusExpectationFailed).JSON(fiber.Map{"error": "Invalid data was received from DB, check logs!"})
-		}
-		transactions = append(transactions, transaction)
-	}
-
-	// Check if the cursor encountered any errors
-	if err := cursor.Err(); err != nil {
-		log.Info("Error getting all transactions from database, Error: " + err.Error())
-		return c.Status(fiber.StatusExpectationFailed).JSON(fiber.Map{"error": "Invalid data was received from DB, check logs!"})
-	}
-
-	return c.Status(200).JSON(transactions)
+func GetAllTransactions(c *fiber.Ctx) error {
+	_, err := GetAll[transaction](c, withCollection("transactions"))
+	return err
 }
-func GetTransactionByID(c *fiber.Ctx, collection *mongo.Collection) error {
-	var transaction transaction
-	id := c.Params("id")
-	err := collection.FindOne(context.Background(), bson.M{"_id": id}).Decode(&transaction)
-	if err != nil {
-		return c.Status(fiber.StatusExpectationFailed).JSON(fiber.Map{"error": "Invalid transaction ID provided"})
-	}
-	return c.Status(200).JSON(fiber.Map{"data": transaction})
+func GetTransactionByID(c *fiber.Ctx) error {
+	res := GetByID[transaction](c, withCollection("transactions"))
+	return res
 }
 
 // CRUD ops for InitAccountRouter
-func CreateAccount(c *fiber.Ctx, collection *mongo.Collection) error {
+func CreateAccount(c *fiber.Ctx) error {
 	var a account
+	collection := withCollection("account")
 	if err := c.BodyParser(&a); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid input"})
 	}
@@ -177,59 +144,29 @@ func CreateAccount(c *fiber.Ctx, collection *mongo.Collection) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Missing Name of the Account"})
 	}
 	a.AccountId = uuid.NewString()
+	a.Id = primitive.NewObjectID()
 	var duplicate account
 	err := collection.FindOne(context.Background(), bson.M{"name": a.Name}).Decode(&duplicate)
-	if err != nil {
+	if err == nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid Account name provided. This account name is already taken"})
 	}
 
 	// Actual logic here thou
-	result, _ := collection.InsertOne(context.Background(), a)
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"success": "Account has been created", "data": result})
+	result, err1 := collection.InsertOne(context.Background(), a)
+	log.Info(err1)
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"success": "Account has been created", "id": result.InsertedID})
 }
-func GetAllAccount(c *fiber.Ctx, collection *mongo.Collection) error {
-	var a []account
-
-	cursor, err := collection.Find(context.Background(), bson.M{})
-	if err != nil {
-		log.Info("Error getting all account from database, Error: " + err.Error())
-		return c.Status(fiber.StatusExpectationFailed).JSON(fiber.Map{"error": "Invalid data was received from DB, check logs!"})
-	}
-	// Close cursor
-	defer func(cursor *mongo.Cursor, ctx context.Context) {
-		err := cursor.Close(ctx)
-		if err != nil {
-			log.Info("Error closing Mongo cursor, Error: " + err.Error())
-		}
-	}(cursor, context.Background())
-
-	for cursor.Next(context.Background()) {
-		var account account
-		if err := cursor.Decode(&account); err != nil {
-			log.Info("Error getting all accounts from database, Error: " + err.Error())
-			return c.Status(fiber.StatusExpectationFailed).JSON(fiber.Map{"error": "Invalid data was received from DB, check logs!"})
-		}
-		a = append(a, account)
-	}
-
-	if err := cursor.Err(); err != nil {
-		log.Info("Error getting all accounts from database, Error: " + err.Error())
-		return c.Status(fiber.StatusExpectationFailed).JSON(fiber.Map{"error": "Invalid data was received from DB, check logs!"})
-	}
-
-	return c.Status(200).JSON(a)
+func GetAllAccount(c *fiber.Ctx) error {
+	_, err := GetAll[account](c, withCollection("account"))
+	return err
 }
-func GetAccountByID(c *fiber.Ctx, collection *mongo.Collection) error {
-	var a account
+func GetAccountByID(c *fiber.Ctx) error {
+	res := GetByID[account](c, withCollection("account"))
+	return res
+}
+func DeleteAccountByID(c *fiber.Ctx) error {
 	id := c.Params("id")
-	err := collection.FindOne(context.Background(), bson.M{"_id": id}).Decode(&a)
-	if err != nil {
-		return c.Status(fiber.StatusExpectationFailed).JSON(fiber.Map{"error": "Invalid account ID provided"})
-	}
-	return c.Status(200).JSON(fiber.Map{"data": a})
-}
-func DeleteAccountByID(c *fiber.Ctx, collection *mongo.Collection) error {
-	id := c.Params("id")
+	collection := withCollection("account")
 
 	err := collection.FindOne(context.Background(), bson.M{"_id": id})
 	if err != nil {
@@ -292,8 +229,10 @@ func DeleteAccountByID(c *fiber.Ctx, collection *mongo.Collection) error {
 //}
 
 // CRUD ops for InitUserRouter
-func CreateUser(c *fiber.Ctx, collection *mongo.Collection) error {
+func CreateUser(c *fiber.Ctx) error {
 	var u user
+	var acc account
+	collection := withCollection("user")
 	if err := c.BodyParser(&u); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid input"})
 	}
@@ -305,57 +244,34 @@ func CreateUser(c *fiber.Ctx, collection *mongo.Collection) error {
 	// add an objectid check since we will pass to it [16]UUID.string obj
 	var duplicate user
 	err := collection.FindOne(context.Background(), bson.M{"name": u.Name}).Decode(&duplicate)
-	if err != nil {
+	if err == nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid username provided. This username is already taken"})
+	}
+	// check for account
+	acID, _ := primitive.ObjectIDFromHex(c.Params("account"))
+	errB := db.Collection("account").FindOne(context.Background(), bson.M{"_id": acID}).Decode(&acc)
+	if errB == nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid account provided. You cannot create a new user with linked account"})
 	}
 
 	// Actual logic here thou
+	u.Id = primitive.NewObjectID()
+	u.Account = append(u.Account, c.Params("account"))
 	result, _ := collection.InsertOne(context.Background(), u)
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"success": "User has been created", "data": result})
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"success": "User has been created", "id": result.InsertedID})
 }
-func GetAllUsers(c *fiber.Ctx, collection *mongo.Collection) error {
-	var u []user
-	cursor, err := collection.Find(context.Background(), bson.M{})
-	if err != nil {
-		log.Info("Error getting all users from database, Error: " + err.Error())
-		return c.Status(fiber.StatusExpectationFailed).JSON(fiber.Map{"error": "Invalid data was received from DB, check logs!"})
-	}
-
-	defer func(cursor *mongo.Cursor, ctx context.Context) {
-		err := cursor.Close(ctx)
-		if err != nil {
-			log.Info("Error closing Mongo cursor, Error: " + err.Error())
-		}
-	}(cursor, context.Background())
-
-	for cursor.Next(context.Background()) {
-		var user user
-		if err := cursor.Decode(&user); err != nil {
-			log.Info("Error getting all users from database, Error: " + err.Error())
-			return c.Status(fiber.StatusExpectationFailed).JSON(fiber.Map{"error": "Invalid data was received from DB, check logs!"})
-		}
-		u = append(u, user)
-	}
-
-	if err := cursor.Err(); err != nil {
-		log.Info("Error getting all users from database, Error: " + err.Error())
-		return c.Status(fiber.StatusExpectationFailed).JSON(fiber.Map{"error": "Invalid data was received from DB, check logs!"})
-	}
-
-	return c.Status(200).JSON(u)
+func GetAllUsers(c *fiber.Ctx) error {
+	_, err := GetAll[user](c, withCollection("user"))
+	return err
 }
-func GetUserByID(c *fiber.Ctx, collection *mongo.Collection) error {
-	var u user
-	id := c.Params("id")
-	err := collection.FindOne(context.Background(), bson.M{"_id": id}).Decode(&u)
-	if err != nil {
-		return c.Status(fiber.StatusExpectationFailed).JSON(fiber.Map{"error": "Invalid user ID provided"})
-	}
-	return c.Status(200).JSON(fiber.Map{"data": u})
+func GetUserByID(c *fiber.Ctx) error {
+	res := GetByID[user](c, withCollection("user"))
+	return res
 }
-func DeleteUserByID(c *fiber.Ctx, collection *mongo.Collection) error {
+func DeleteUserByID(c *fiber.Ctx) error {
 	id := c.Params("id")
 	var u user
+	collection := withCollection("user")
 
 	err := collection.FindOne(context.Background(), bson.M{"_id": id}).Decode(&u)
 	if err != nil {
@@ -372,9 +288,10 @@ func DeleteUserByID(c *fiber.Ctx, collection *mongo.Collection) error {
 	}
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "User deleted successfully"})
 }
-func UpdateUserByID(c *fiber.Ctx, collection *mongo.Collection) error {
+func UpdateUserByID(c *fiber.Ctx) error {
 	var u user
 	var uu user
+	collection := withCollection("user")
 	id := c.Params("id")
 	// Validate if the ID is a valid ObjectID
 	err := collection.FindOne(context.Background(), bson.M{"_id": id}).Decode(&u)
@@ -410,4 +327,72 @@ func UpdateUserByID(c *fiber.Ctx, collection *mongo.Collection) error {
 		"message": "User updated successfully",
 		"updated": uu,
 	})
+}
+
+// Others
+func AuthBank(c *fiber.Ctx) error {
+	// Generate JWT for the authenticated user
+	token, err := utils.GenerateToken(chBank.String(), "BANK_ISSUER", 72)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to generate token",
+		})
+	}
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+		"token": token,
+	})
+}
+func CheckToken(c *fiber.Ctx) error {
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{"auth": "success"})
+}
+
+func GetAll[T any](c *fiber.Ctx, collection *mongo.Collection) ([]T, error) {
+	var results []T
+
+	// Perform a find operation on the collection
+	cursor, err := collection.Find(context.Background(), bson.M{})
+	if err != nil {
+		log.Info("Error retrieving documents from database, Error: " + err.Error())
+		return nil, c.Status(fiber.StatusExpectationFailed).JSON(fiber.Map{"error": "Invalid data was received from DB, check logs!"})
+	}
+	// Ensure the cursor is closed after processing
+	defer func(cursor *mongo.Cursor, ctx context.Context) {
+		err := cursor.Close(ctx)
+		if err != nil {
+			log.Info("Error closing Mongo cursor, Error: " + err.Error())
+		}
+	}(cursor, context.Background())
+
+	// Decode each document into the result slice
+	for cursor.Next(context.Background()) {
+		var item T
+		if err := cursor.Decode(&item); err != nil {
+			log.Info("Error decoding document from database, Error: " + err.Error())
+			return nil, c.Status(fiber.StatusExpectationFailed).JSON(fiber.Map{"error": "Invalid data was received from DB, check logs!"})
+		}
+		results = append(results, item)
+	}
+
+	// Check if there were any errors during cursor iteration
+	if err := cursor.Err(); err != nil {
+		log.Info("Error iterating over cursor, Error: " + err.Error())
+		return nil, c.Status(fiber.StatusExpectationFailed).JSON(fiber.Map{"error": "Invalid data was received from DB, check logs!"})
+	}
+
+	// Check if context provided
+	if c == nil {
+		return results, nil
+	}
+
+	// Return the results as JSON
+	return nil, c.Status(fiber.StatusOK).JSON(results)
+}
+func GetByID[T any](c *fiber.Ctx, collection *mongo.Collection) error {
+	var result T
+	id, _ := primitive.ObjectIDFromHex(c.Params("id"))
+	err := collection.FindOne(context.Background(), bson.M{"_id": id}).Decode(&result)
+	if err == nil {
+		return c.Status(fiber.StatusExpectationFailed).JSON(fiber.Map{"error": "Invalid ID provided"})
+	}
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{"data": result})
 }

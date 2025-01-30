@@ -1,12 +1,12 @@
 package main
 
 import (
-	"BankAPI/router"
 	"fmt"
+	"github.com/vovamod/BankAPI/server"
 )
 
 func main() {
-	app := router.App{}
+	app := server.App{}
 	err := app.Start()
 	if err != nil {
 		fmt.Println("Error occurred due to: %w", err)
