@@ -8,9 +8,10 @@ User may create as many accounts as he wants and save values on them as he pleas
 # Tasks
 - [x] Create a basic Server wrapper and load routes from data.go
 - [x] Implement some routing via func pass to method Init() for better codebase
-- [ ] Add Account and User tables with CRUD ops as well
-- [ ] Add middleware to verify requests and their rights
-- [ ] Auth system (IDK, not needed nor requested, but maybe I'll implement that)
+- [x] Add Account and User tables with CRUD ops as well
+- [x] Add middleware to verify requests and their rights
+- [x] Auth system (IDK, not needed nor requested, but maybe I'll implement that)
+- [ ] Fix bugs with mongo (?)
 
 # Usage
 TODO
