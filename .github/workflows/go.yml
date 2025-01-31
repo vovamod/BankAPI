@@ -16,6 +16,8 @@ jobs:
       uses: actions/setup-go@v4
       with:
         go-version: '1.23'
+        # Ignore go.sum error. Don't bother
+        cache: false
     
     - name: Load libs
       run: go mod tidy
