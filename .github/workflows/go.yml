@@ -3,7 +3,9 @@
 
 name: Go build - L64X
 
-on: ['push', 'workflow_dispatch']
+#on: ['push', 'workflow_dispatch']
+
+on: workflow_dispatch
 
 jobs:
 
@@ -24,3 +26,4 @@ jobs:
       
     - name: Build
       run: go build -v ./...
+    # Maybe add test. Not sure
