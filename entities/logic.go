@@ -9,6 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"os"
 	"time"
 )
 
@@ -34,6 +35,9 @@ type user struct {
 	Account  []string           `bson:"account"`
 	ObjectId string             `bson:"objectId"`
 }
+type token struct {
+	Token string `json:"token"`
+}
 
 // Static checkID
 var chBank primitive.ObjectID
@@ -42,17 +46,12 @@ var chBank primitive.ObjectID
 var db *mongo.Database
 
 // Init all operations and add them to main App via pointer
-func Init(dbA *mongo.Database) {
-	db = dbA
+func Init() {
+	db = utils.MongoDatabase()
 	BankInit(db, "account")
-	//InitAuthRouter(app, db)
-	//InitTransactionRouter(app, db)
-	//InitAccountRouter(app, db)
-	//InitUserRouter(app, db)
-	//CheckBank(db)
 }
 
-// Bank check
+// BankInit check BANK_ISSUER in system for proper Bank support at plugin site (secure enough???)
 func BankInit(db *mongo.Database, collectionName string) {
 	var ac account
 	collection := db.Collection(collectionName)
@@ -127,8 +126,7 @@ func GetAllTransactions(c *fiber.Ctx) error {
 	return err
 }
 func GetTransactionByID(c *fiber.Ctx) error {
-	res := GetByID[transaction](c, withCollection("transactions"))
-	return res
+	return GetByID[transaction](c, withCollection("transactions"))
 }
 
 // CRUD ops for InitAccountRouter
@@ -161,8 +159,7 @@ func GetAllAccount(c *fiber.Ctx) error {
 	return err
 }
 func GetAccountByID(c *fiber.Ctx) error {
-	res := GetByID[account](c, withCollection("account"))
-	return res
+	return GetByID[account](c, withCollection("account"))
 }
 func DeleteAccountByID(c *fiber.Ctx) error {
 	id := c.Params("id")
@@ -179,6 +176,7 @@ func DeleteAccountByID(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "Account deleted successfully"})
 }
 
+// TODO: Understand why I wrote such a bad code and why I wanted THAT in the first place!
 //func UpdateAccountByID(c *fiber.Ctx, collection *mongo.Collection) error {
 //	accountID := c.Params("id")
 //
@@ -265,8 +263,7 @@ func GetAllUsers(c *fiber.Ctx) error {
 	return err
 }
 func GetUserByID(c *fiber.Ctx) error {
-	res := GetByID[user](c, withCollection("user"))
-	return res
+	return GetByID[user](c, withCollection("user"))
 }
 func DeleteUserByID(c *fiber.Ctx) error {
 	id := c.Params("id")
@@ -332,6 +329,14 @@ func UpdateUserByID(c *fiber.Ctx) error {
 // Others
 func AuthBank(c *fiber.Ctx) error {
 	// Generate JWT for the authenticated user
+	var t token
+	sToken := os.Getenv("BANK_256_CODE")
+	if err := c.BodyParser(&t); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid key provided"})
+	}
+	if sToken != t.Token {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid key provided"})
+	}
 	token, err := utils.GenerateToken(chBank.String(), "BANK_ISSUER", 72)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{

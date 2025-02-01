@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/log"
 	"github.com/gofiber/fiber/v2/middleware/logger"
@@ -9,8 +8,6 @@ import (
 	"github.com/vovamod/BankAPI/entities"
 	"github.com/vovamod/BankAPI/router"
 	"github.com/vovamod/BankAPI/utils"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"os"
 )
 
@@ -30,8 +27,8 @@ func New(app *fiber.App) *fiber.App {
 	// check env. If missing stop process with fatal log
 	utils.CheckEnv()
 	// Init Mongo Client and pass to others!
-	db := mongoDatabase().Database("testDB")
-	loadRoutes(app, db)
+	log.Info("Last phase, configuring routes to server")
+	loadRoutes(app)
 	return app
 }
 
@@ -40,34 +37,15 @@ func (a *App) Start() error {
 		AppName: "BankAPI",
 	})
 	New(app)
-	err := app.Listen(":3000")
+	err := app.Listen(os.Getenv("ADDR"))
 	if err != nil {
 		log.Fatal("an error occurred in server.go due to: %w", err)
 	}
 	return nil
 }
 
-func loadRoutes(app *fiber.App, db *mongo.Database) *fiber.App {
-	entities.Init(db)
+func loadRoutes(app *fiber.App) *fiber.App {
+	entities.Init()
 	router.Configure(app)
 	return app
-}
-
-// func for mongo?
-func mongoDatabase() *mongo.Client {
-	// Check ENV for string
-	uri := os.Getenv("MONGODB_URI")
-	if uri == "" {
-		log.Fatal("Set your 'MONGODB_URI' environment variable")
-	}
-	// Init client, mongo driver Client.
-	client, err := mongo.Connect(context.TODO(), options.Client().ApplyURI(uri))
-	if err != nil {
-		panic(err)
-	}
-	// Check whether DB is alive and ping still works
-	if c := client.Ping(nil, nil); c != nil {
-		log.Fatal("Cannot connect to MongoDB. Error: " + c.Error())
-	}
-	return client
 }
